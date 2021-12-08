@@ -23,23 +23,31 @@ import time
 
 class PINN_Worker(Worker):
     
-    def __init__(self,valData,test_gridObj,PDESystem,configspecs):
+    def __init__(self,valData,test_gridObj,PDESystem,configspecs,*args,**kwargs):
+        
+        #Worker elements
+        super().__init__(*args, **kwargs)
+
+        
         
         #Load validation data
         #Validation files should be in the same order as funcNames in System
         valuesSet = []
+        print('Parsing validation data')
         for dataFile in valData[0]:
-            points, values = AF.preparadatos(dataFile,valData[1])
+            points, values = AF.preparadatos(dataFile,valData[1],test_gridObj.ndim)
             valuesSet.append(values)
         #Generar mallado y datos de test
         self.validation_preds = []
+        print('Applying validation data to test grid')
         for values in valuesSet:
             self.validation_preds.append(griddata(points, values, test_gridObj.grid , method='nearest'))
         self.test_gridObj = test_gridObj
         #Guardar objeto System
+        print('Saving PDE and config')
         self.PDESystem = PDESystem
         self.configspecs = configspecs
-        
+        print('Worker ready')
         
     def compute(self,config,budget,**kwargs):
         with mlflow.start_run():
@@ -50,10 +58,8 @@ class PINN_Worker(Worker):
                                      self.test_gridObj.dimnames,
                                      self.test_gridObj.cubes, config['denspt'])
             
-            
-            variables = self.PDESystem.getVariables()
-            Functionals, PDEs = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],config['activator'])
-            m = sn.SciModel(variables,PDEs,config['loss'],config['optimizer'])
+            Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],config['activator'])
+            m = sn.SciModel(list(variables.values()),PDEs,config['loss'],config['optimizer'])
             
             dimlist, data = self.PDESystem.evalSystem(train_gridObj)
             
@@ -63,17 +69,17 @@ class PINN_Worker(Worker):
             mlflow.log_param('Activation Function',config['activator'])
             mlflow.log_param('Loss Function',config['loss'])
             mlflow.log_param('Optimizer',config['optimizer'])
-            mlflow.log_param('Num Points',train_gridObj.shape[0])
-            
+            mlflow.log_param('Num Points',train_gridObj.grid.shape[0])
+            mlflow.log_param('Epochs',int(budget))
             
             start = time.process_time()
-            history = m.train(dimlist,data, epochs = budget,verbose=0,
+            history = m.train(dimlist,data, epochs = int(budget),verbose=0,
                                     batch_size=config['batch_size'])        
             TrainTime = time.process_time()-start
             
             preds = []
             start2 = time.process_time()
-            for functional in Functionals:
+            for functional in Functionals.values():
                 pred = functional.eval(m,[self.test_gridObj.grid[:,i] for i in range(self.test_gridObj.grid.shape[1])])
                 preds.append(pred)
             TestTime = time.process_time() - start2
@@ -100,7 +106,15 @@ class PINN_Worker(Worker):
             np.save('History',history.history,allow_pickle=True)
             mlflow.log_artifact('History.npy')
             
-            
+            return ({
+			'loss': L1, # remember: HpBandSter always minimizes!
+			'info': {	'L1': L1,
+						'L2': L2,
+						'MAX': MAX,
+						'TrainTime': TrainTime,
+					}})
+						
+		
 
     def get_configspace(self):
         
@@ -118,7 +132,7 @@ class PINN_Worker(Worker):
                                                   lower=self.configspecs['numLayers'][0],
                                                   upper=self.configspecs['numLayers'][1])
         
-        config_space.add_hyperparameter([denspt,numNeurons,numLayers])
+        config_space.add_hyperparameters([denspt,numNeurons,numLayers])
 
         
         activator = CSH.CategoricalHyperparameter(name = 'activator',
@@ -133,7 +147,7 @@ class PINN_Worker(Worker):
         batch_size = CSH.CategoricalHyperparameter(name = 'batch_size',
                                                   choices = self.configspecs['batch_size'])
         
-        config_space.add_hyperparameter([activator,loss,optimizer,batch_size])
+        config_space.add_hyperparameters([activator,loss,optimizer,batch_size])
         
         return(config_space)
     

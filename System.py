@@ -17,7 +17,7 @@ from sciann.utils.math import diff, sign, sin, exp
 class PDESystem:
     
     def __init__(self,variableNames,funcNames,paramSpecs,constants):
-        self.variables = self.createVariables(variableNames)
+        self.variableNames = variableNames
         self.funcNames = funcNames
         self.equations = []
         self.functionals = {}
@@ -30,12 +30,14 @@ class PDESystem:
         else:
             print('This object is not an Equation')
      
-    def createFunctionals(self,numNeurons,numLayers,activation):
+    def createFunctionals(self,numNeurons,numLayers,activation,variables):
+        functionals = {}
         for funcName in self.funcNames.keys():
-            self.functionals[funcName] = Functional(funcName,
-                                                    list(self.variables.values()),
-                                                    numLayers*[numNeurons],
+            functionals[funcName] = Functional(funcName,
+                                                    list(variables.values()),
+                                                    10*[10],
                                                     activation)
+        return functionals
             
         
     def evalSystem(self,gridObj):
@@ -49,15 +51,14 @@ class PDESystem:
         return dimList,data
     
     def getPDEs(self,numNeurons,numLayers,activation):
-        self.createFunctionals(numNeurons,numLayers,activation)
-        elementDict = self.collapseItemDictionaries()
+        variables = self.createVariables(self.variableNames)
+        functionals = self.createFunctionals(numNeurons,numLayers,activation,variables)
+        elementDict = self.collapseItemDictionaries(variables,functionals)
         PDEs = [equation.execPDE(elementDict) for equation in self.equations]
-        functionals = self.functionals
-        self.functionals = {}
-        return functionals, PDEs
+        return functionals, PDEs, variables
     
-    def collapseItemDictionaries(self):
-        elementDict = {**self.variables,**self.constants,**self.parameters,**self.functionals}
+    def collapseItemDictionaries(self,variables,functionals):
+        elementDict = {**variables,**self.constants,**self.parameters,**functionals}
         return elementDict
     
     def createVariables(self,variableNames):
@@ -68,8 +69,7 @@ class PDESystem:
         params = {spec['name']:Parameter(**spec,inputs=self.variables) for spec in paramSpecs}
         return params
         
-    def getVariables(self):
-        return list(self.variables.values())
+
 
     
 
