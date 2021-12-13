@@ -23,7 +23,8 @@ import time
 
 class PINN_Worker(Worker):
     
-    def __init__(self,valData,test_gridObj,PDESystem,configspecs,*args,**kwargs):
+    def __init__(self,valData,test_gridObj,PDESystem,configspecs,valFromFEM=True
+                 ,*args,**kwargs):
         
         #Worker elements
         super().__init__(*args, **kwargs)
@@ -33,14 +34,26 @@ class PINN_Worker(Worker):
         #Load validation data
         #Validation files should be in the same order as funcNames in System
         valuesSet = []
-        print('Parsing validation data')
-        for dataFile in valData[0]:
-            points, values = AF.preparadatos(dataFile,valData[1],test_gridObj.ndim)
-            valuesSet.append(values)
+        pointsSet = []
+        if valFromFEM:
+            print('Parsing validation data')
+            for dataFile in valData[0]:
+                if type(dataFile) == str:
+                    points, values = AF.preparadatos(dataFile,valData[1],test_gridObj.ndim)
+                else:
+                    print('Data is not string. Assuming data as 2-D numpy array')
+                    points = dataFile[:,:-1]
+                    values = dataFile[:,-1]
+                valuesSet.append(values)
+                pointsSet.append(points)
+        else:
+            for i in range(test_gridObj.ndim,valData.shape[1]):
+                pointsSet.append(valData[:,:test_gridObj.ndim])
+                valuesSet.append(valData[:,i])
         #Generar mallado y datos de test
         self.validation_preds = []
         print('Applying validation data to test grid')
-        for values in valuesSet:
+        for values,points in zip(valuesSet,pointsSet):
             self.validation_preds.append(griddata(points, values, test_gridObj.grid , method='nearest'))
         self.test_gridObj = test_gridObj
         #Guardar objeto System
