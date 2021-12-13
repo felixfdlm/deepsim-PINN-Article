@@ -11,7 +11,7 @@ from sciann import Functional
 from sciann import Parameter
 from sciann import Variable
 from sciann.utils.math import diff, sign, sin, exp
-
+import re
 
 
 class PDESystem:
@@ -76,34 +76,91 @@ class PDESystem:
 class Equation:
     
     def __init__(self,constraints,valuesFunc,PDE):
-        self.constraints = constraints
+        self.constraints = constraints[0]
+        self.formula = constraints[1]
         self.values = valuesFunc
         self.PDE = PDE
-    
-    #meter cttes
-    def evalConstraints(self,gridObj,constants):
-        currInd = np.arange(gridObj.grid.shape[0])
-        for constraint in self.constraints:
-            currInd = np.intersect1d(currInd,constraint.evalOverGrid(gridObj,constants))
-        return currInd
-    
-    #meter cttes
+
+
+    ###########################################################################
+    #Functions related to applying the equation to the grid
+
     def getValues(self,gridObj,constants):
-        indexes = self.evalConstraints(gridObj,constants)
+        
+        setDict = self.evalConstraints(gridObj, constants)
+        
+        indexes = self.applyFormula(setDict)
+
+        indexes = np.array(list(indexes))
+
         if type(self.values) == str:
             values = self.evalOverGrid(gridObj,indexes,constants)
             return((indexes[:,None],values[:,None]))
         else:
             return((indexes[:,None],self.values))
+
+    
+    def evalConstraints(self,gridObj,constants):
+        setDict = {k:v.evalOverGrid(gridObj,constants) for (k,v) in self.constraints.items()}        
+        setDict['Om'] = set(np.arange(gridObj.grid.shape[0]))
+       
+        return setDict
+    
+    
+    def applyFormula(self,setDict):
+        
+        levels,operations,elementOrder = self.parseFormula(self.formula,list(setDict.keys()))
+        elementOrder = [setDict.get(k) for k in elementOrder]
+        
+        while len(elementOrder)>1:
+            index = levels.index(max(levels))
+            sets = [elementOrder[index],elementOrder[index+1]]
+            operation = operations[index]
+            if operation == 'n':
+                newSet = sets[0].intersection(sets[1])
+            if operation == 'u':
+                newSet = sets[0].union(sets[1])
+                
+            del levels[index]
+            del operations[index]
+            del elementOrder[index+1]
+            elementOrder[index] = newSet
+        return elementOrder[0]
+        
+    
+    def parseFormula(self,formula,elementKeys):
+        
+        #This function receives a set operation formula such as AnBu(CnD) where sets
+        #are always written in MAYUS and "n" means instersection and "u" means union.
+        
+        ops = formula
+        for key in elementKeys:
+            ops = ops.replace(key,'')
             
-    #meter cttes #hecho
+        levels = []
+        operations = []
+        level = 0
+        for char in ops:
+            if char in ('n','u'):
+                operations.append(char)
+                levels.append(level)
+            if char == '(':
+                level +=1
+            if char == ')':
+                level -=1
+                
+        elementOrder = re.sub('[() ]','', formula)
+        elementOrder = re.split('n|u',elementOrder)
+        
+        return levels, operations, elementOrder
+
+            
     def evalOverGrid(self,gridObj,indexes,constants):
         preparedFUN = self.prepareValuesFunc(gridObj.dimnames,constants)
         evaluationSentence = 'values = ' + preparedFUN
         exec(evaluationSentence) 
         return locals()['values']
         
-    #meter cttes #hecho
     def prepareValuesFunc(self,dimnames,constants):
         splittedFUN = self.values.split('#')
         splittedFUN = [str(constants.get(k,k)) for k in splittedFUN]
@@ -111,6 +168,8 @@ class Equation:
         preparedFUN = ''.join([str(newDimnames.get(k,k)) for k in splittedFUN])
         return preparedFUN
     
+    ###########################################################################
+    #Functions related to applying PDE to the functional
 
     def execPDE(self,elementDict):
         preparedPDE = self.preparePDE(elementDict)
@@ -136,7 +195,7 @@ class Constraint:
         preparedFUN = self.prepareFUN(gridObj.dimnames,constants)
         evaluationSentence = 'indexes = np.where(' +preparedFUN + self.comparator + str(self.CTT) + ')'
         exec(evaluationSentence) 
-        return locals()['indexes'][0]
+        return set(locals()['indexes'][0])
         
          
     def prepareFUN(self,dimnames,constants):
