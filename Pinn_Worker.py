@@ -29,6 +29,8 @@ class PINN_Worker(Worker):
         #Worker elements
         super().__init__(*args, **kwargs)
 
+        self.client = mlflow.tracking.MlflowClient()
+        self.worker_id = kwargs['id']
         
         
         #Load validation data
@@ -63,63 +65,63 @@ class PINN_Worker(Worker):
         print('Worker ready')
         
     def compute(self,config,budget,**kwargs):
-        with mlflow.start_run():
-            
-            
-            
-            train_gridObj = SEQ.Grid(self.test_gridObj.ndim, 
-                                     self.test_gridObj.dimnames,
-                                     self.test_gridObj.cubes, config['denspt'])
-            
-            Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],config['activator'])
-            m = sn.SciModel(list(variables.values()),PDEs,config['loss'],config['optimizer'])
-            
-            dimlist, data = self.PDESystem.evalSystem(train_gridObj)
-            
-            mlflow.log_param('Density',config['denspt'])
-            mlflow.log_param('Num Neurons',config['numNeurons'])
-            mlflow.log_param('Num Layers',config['numLayers'])
-            mlflow.log_param('Activation Function',config['activator'])
-            mlflow.log_param('Loss Function',config['loss'])
-            mlflow.log_param('Optimizer',config['optimizer'])
-            mlflow.log_param('Num Points',train_gridObj.grid.shape[0])
-            mlflow.log_param('Epochs',int(budget))
-            
-            start = time.process_time()
-            history = m.train(dimlist,data, epochs = int(budget),verbose=0,
-                                    batch_size=config['batch_size'])        
-            TrainTime = time.process_time()-start
-            
-            preds = []
-            start2 = time.process_time()
-            for functional in Functionals.values():
-                pred = functional.eval(m,[self.test_gridObj.grid[:,i] for i in range(self.test_gridObj.grid.shape[1])])
-                preds.append(pred)
-            TestTime = time.process_time() - start2
-            
-            predErrors = []
-            for pred,val in zip(preds,self.validation_preds) :
-                predErrors.append(pred-val)
-            
-            L1 = self.test_gridObj.volume * np.sum([np.mean(np.abs(error)) for error in predErrors])
-            
-            L2 = self.test_gridObj.volume * np.sum([np.mean(error**2)**1/2 for error in predErrors])
         
-            MAX = np.max([np.abs(error).max() for error in predErrors])
+        #Adding an implementation for multiple experiments could be useful
+        run = self.client.create_run('0')
             
-            mlflow.log_metric('L1',L1)
-            mlflow.log_metric('L2',L2)
-            mlflow.log_metric('MAX',MAX)
-            mlflow.log_metric('TrainTime',TrainTime)
-            mlflow.log_metric('TestTime',TestTime)
-            
-            np.save('Predictions',np.array(preds),allow_pickle=True)
-            mlflow.log_artifact('Predictions.npy')
-            
-            np.save('History',history.history,allow_pickle=True)
-            mlflow.log_artifact('History.npy')
-            
-            return ({
+        train_gridObj = SEQ.Grid(self.test_gridObj.ndim, 
+                                 self.test_gridObj.dimnames,
+                                 self.test_gridObj.cubes, config['denspt'])
+        
+        Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],config['activator'])
+        m = sn.SciModel(list(variables.values()),PDEs,config['loss'],config['optimizer'])
+        
+        dimlist, data = self.PDESystem.evalSystem(train_gridObj)
+        
+        self.client.log_param(run_id=run.info.run_id,key='Density',value=config['denspt'])
+        self.client.log_param(run_id=run.info.run_id,key='Num Neurons',value=config['numNeurons'])
+        self.client.log_param(run_id=run.info.run_id,key='Num Layers',value=config['numLayers'])
+        self.client.log_param(run_id=run.info.run_id,key='Activation Function',value=config['activator'])
+        self.client.log_param(run_id=run.info.run_id,key='Loss Function',value=config['loss'])
+        self.client.log_param(run_id=run.info.run_id,key='Optimizer',value=config['optimizer'])
+        self.client.log_param(run_id=run.info.run_id,key='Num Points',value=train_gridObj.grid.shape[0])
+        self.client.log_param(run_id=run.info.run_id,key='Epochs',value=int(budget))
+        
+        start = time.process_time()
+        history = m.train(dimlist,data, epochs = int(budget),verbose=0,
+                                batch_size=config['batch_size'])        
+        TrainTime = time.process_time()-start
+        
+        preds = []
+        start2 = time.process_time()
+        for functional in Functionals.values():
+            pred = functional.eval(m,[self.test_gridObj.grid[:,i] for i in range(self.test_gridObj.grid.shape[1])])
+            preds.append(pred)
+        TestTime = time.process_time() - start2
+        
+        predErrors = []
+        for pred,val in zip(preds,self.validation_preds) :
+            predErrors.append(pred-val)
+        
+        L1 = self.test_gridObj.volume * np.sum([np.mean(np.abs(error)) for error in predErrors])
+        
+        L2 = self.test_gridObj.volume * np.sum([np.mean(error**2)**1/2 for error in predErrors])
+    
+        MAX = np.max([np.abs(error).max() for error in predErrors])
+        
+        self.client.log_metric(run_id=run.info.run_id,key='L1',value=L1)
+        self.client.log_metric(run_id=run.info.run_id,key='L2',value=L2)
+        self.client.log_metric(run_id=run.info.run_id,key='MAX',value=MAX)
+        self.client.log_metric(run_id=run.info.run_id,key='TrainTime',value=TrainTime)
+        self.client.log_metric(run_id=run.info.run_id,key='TestTime',value=TestTime)
+        
+        np.save('Predictions'+str(self.worker_id),np.array(preds),allow_pickle=True)
+        self.client.log_artifact(run_id=run.info.run_id,artifact_path='Predictions' + str(self.worker_id) + '.npy')
+        
+        np.save('History'+str(self.worker_id),history.history,allow_pickle=True)
+        self.client.log_artifact(run_id=run.info.run_id,artifact_path='History' + str(self.worker_id) + 'npy')
+        
+        return ({
 			'loss': L1, # remember: HpBandSter always minimizes!
 			'info': {	'L1': L1,
 						'L2': L2,
