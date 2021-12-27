@@ -23,14 +23,21 @@ import time
 
 class PINN_Worker(Worker):
     
-    def __init__(self,valData,test_gridObj,PDESystem,configspecs,valFromFEM=True
+    def __init__(self,valData,test_gridObj,PDESystem,configspecs,valFromFEM=True,experiment_name='DEFAULT'
                  ,*args,**kwargs):
         
         #Worker elements
         super().__init__(*args, **kwargs)
 
         self.client = mlflow.tracking.MlflowClient()
-        self.worker_id = kwargs['id']
+        self.mlflow_id = kwargs['id']
+        
+        #Check if experiment exists and get id. If not, create experiment and save id
+        if experiment_name in [experiment.name for experiment in mlflow.list_experiments()]:
+            experiment = mlflow.get_experiment_by_name(experiment_name)
+            self.experiment_id = experiment.experiment_id
+        else:
+            self.experiment_id = mlflow.create_experiment(experiment_name)
         
         
         #Load validation data
@@ -67,7 +74,7 @@ class PINN_Worker(Worker):
     def compute(self,config,budget,**kwargs):
         
         #Adding an implementation for multiple experiments could be useful
-        run = self.client.create_run('0')
+        run = self.client.create_run(self.experiment_id)
             
         train_gridObj = SEQ.Grid(self.test_gridObj.ndim, 
                                  self.test_gridObj.dimnames,
@@ -115,11 +122,11 @@ class PINN_Worker(Worker):
         self.client.log_metric(run_id=run.info.run_id,key='TrainTime',value=TrainTime)
         self.client.log_metric(run_id=run.info.run_id,key='TestTime',value=TestTime)
         
-        np.save('Predictions'+str(self.worker_id),np.array(preds),allow_pickle=True)
-        self.client.log_artifact(run_id=run.info.run_id,artifact_path='Predictions' + str(self.worker_id) + '.npy')
+        np.save('Predictions'+str(self.mlflow_id),np.array(preds),allow_pickle=True)
+        self.client.log_artifact(run_id=run.info.run_id,artifact_path='Predictions' + str(self.mlflow_id) + '.npy')
         
-        np.save('History'+str(self.worker_id),history.history,allow_pickle=True)
-        self.client.log_artifact(run_id=run.info.run_id,artifact_path='History' + str(self.worker_id) + 'npy')
+        np.save('History'+str(self.mlflow_id),history.history,allow_pickle=True)
+        self.client.log_artifact(run_id=run.info.run_id,artifact_path='History' + str(self.mlflow_id) + 'npy')
         
         return ({
 			'loss': L1, # remember: HpBandSter always minimizes!
