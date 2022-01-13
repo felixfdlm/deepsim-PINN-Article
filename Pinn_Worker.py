@@ -28,15 +28,17 @@ class PINN_Worker(Worker):
         
         #Worker elements
         super().__init__(*args, **kwargs)
-
+        print('Creating client')
         self.client = mlflow.tracking.MlflowClient()
         self.mlflow_id = kwargs['id']
         
         #Check if experiment exists and get id. If not, create experiment and save id
         if experiment_name in [experiment.name for experiment in mlflow.list_experiments()]:
+            print('Existing experiment. Recovering id.')
             experiment = mlflow.get_experiment_by_name(experiment_name)
             self.experiment_id = experiment.experiment_id
         else:
+            print('New experiment. Creating instance.')
             self.experiment_id = mlflow.create_experiment(experiment_name)
         
         
@@ -123,10 +125,10 @@ class PINN_Worker(Worker):
         self.client.log_metric(run_id=run.info.run_id,key='TestTime',value=TestTime)
         
         np.save('Predictions'+str(self.mlflow_id),np.array(preds),allow_pickle=True)
-        self.client.log_artifact(run_id=run.info.run_id,artifact_path='Predictions' + str(self.mlflow_id) + '.npy')
+        self.client.log_artifact(run.info.run_id,'Predictions' + str(self.mlflow_id) + '.npy')
         
         np.save('History'+str(self.mlflow_id),history.history,allow_pickle=True)
-        self.client.log_artifact(run_id=run.info.run_id,artifact_path='History' + str(self.mlflow_id) + 'npy')
+        self.client.log_artifact(run.info.run_id,'History' + str(self.mlflow_id) + '.npy')
         
         return ({
 			'loss': L1, # remember: HpBandSter always minimizes!
@@ -172,5 +174,5 @@ class PINN_Worker(Worker):
         config_space.add_hyperparameters([activator,loss,optimizer,batch_size])
         
         return(config_space)
-    
+
     
