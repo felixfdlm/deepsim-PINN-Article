@@ -12,6 +12,8 @@ import ConfigSpace.hyperparameters as CSH
 import numpy as np
 
 import sciann as sn
+import tensorflow as tf
+import tensorflow_addons as tfa
 
 from scipy.interpolate import griddata
 import AuxFuncts as AF
@@ -82,7 +84,8 @@ class PINN_Worker(Worker):
                                  self.test_gridObj.dimnames,
                                  self.test_gridObj.cubes, config['denspt'])
         
-        Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],config['activator'])
+        activator_obj = tf.keras.activations.deserialize(config['activator'])
+        Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],activator_obj)
         m = sn.SciModel(list(variables.values()),PDEs,config['loss'],config['optimizer'])
         
         dimlist, data = self.PDESystem.evalSystem(train_gridObj)
@@ -93,12 +96,13 @@ class PINN_Worker(Worker):
         self.client.log_param(run_id=run.info.run_id,key='Activation Function',value=config['activator'])
         self.client.log_param(run_id=run.info.run_id,key='Loss Function',value=config['loss'])
         self.client.log_param(run_id=run.info.run_id,key='Optimizer',value=config['optimizer'])
+        self.client.log_param(run_id=run.info.run_id,key='Initial LR',value=config['initial_lr'])
         self.client.log_param(run_id=run.info.run_id,key='Num Points',value=train_gridObj.grid.shape[0])
         self.client.log_param(run_id=run.info.run_id,key='Epochs',value=int(budget))
         
         start = time.process_time()
         history = m.train(dimlist,data, epochs = int(budget),verbose=0,
-                                batch_size=config['batch_size'])        
+                                batch_size=config['batch_size'],learning_rate=config['initial_lr'])        
         TrainTime = time.process_time()-start
         
         preds = []
@@ -156,7 +160,11 @@ class PINN_Worker(Worker):
                                                   lower=self.configspecs['numLayers'][0],
                                                   upper=self.configspecs['numLayers'][1])
         
-        config_space.add_hyperparameters([denspt,numNeurons,numLayers])
+        initial_lr = CSH.UniformFloatHyperparameter(name='initial_lr',
+                                                   lower = self.configspecs['initial_lr'][0],
+                                                   upper = self.configspecs['initial_lr'][1],)
+        
+        config_space.add_hyperparameters([denspt,numNeurons,numLayers,initial_lr])
 
         
         activator = CSH.CategoricalHyperparameter(name = 'activator',
