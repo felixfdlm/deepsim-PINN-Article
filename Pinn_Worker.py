@@ -12,6 +12,8 @@ import ConfigSpace.hyperparameters as CSH
 import numpy as np
 
 import sciann as sn
+import tensorflow as tf
+import tensorflow_addons as tfa
 
 from scipy.interpolate import griddata
 import AuxFuncts as AF
@@ -82,7 +84,8 @@ class PINN_Worker(Worker):
                                  self.test_gridObj.dimnames,
                                  self.test_gridObj.cubes, config['denspt'])
         
-        Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],config['activator'])
+        activator_obj = tf.keras.activations.deserialize(config['activator'])
+        Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],activator_obj)
         m = sn.SciModel(list(variables.values()),PDEs,config['loss'],config['optimizer'])
         
         dimlist, data = self.PDESystem.evalSystem(train_gridObj)
