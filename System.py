@@ -22,7 +22,7 @@ class PDESystem:
         self.equations = []
         self.functionals = {}
         self.constants = constants
-        self.parameters = self.createParams(paramSpecs)
+        self.parameterSpecs = paramSpecs
         
     def addEquation(self,equation):
         if isinstance(equation, Equation):
@@ -30,13 +30,24 @@ class PDESystem:
         else:
             print('This object is not an Equation')
      
-    def createFunctionals(self,numNeurons,numLayers,activation,variables):
+    def createFunctionals(self,numNeurons,numLayers,activation,variables,parameters):
+        #Initialize empty functional dictionary
         functionals = {}
-        for funcName in self.funcNames.keys():
+        #First create base functionals (the ones defined by numbers).
+        for funcName in [key for key in self.funcNames.keys() if type(self.funcNames[key])==int]:
             functionals[funcName] = Functional(funcName,
                                                     list(variables.values()),
-                                                    10*[10],
+                                                    numNeurons*[numLayers],
                                                     activation)
+            
+        #Then create the functionals derived from base ones
+        for funcName in [key for key in self.funcNames.keys() if type(self.funcNames[key])==str]:
+            sentence = self.funcNames[funcName]
+            elementDict = self.collapseItemDictionaries(variables,functionals,parameters)
+            preparedFunctionalSentence = self.prepareFunctionalSentence(sentence,elementDict)
+            
+            exec(funcName + '=' + preparedFunctionalSentence)
+            functionals[funcName] = locals()[funcName]
         return functionals
             
         
@@ -52,24 +63,30 @@ class PDESystem:
     
     def getPDEs(self,numNeurons,numLayers,activation):
         variables = self.createVariables(self.variableNames)
-        functionals = self.createFunctionals(numNeurons,numLayers,activation,variables)
-        elementDict = self.collapseItemDictionaries(variables,functionals)
+        parameters = self.createParams(variables)
+        functionals = self.createFunctionals(numNeurons,numLayers,activation,variables,parameters)
+        elementDict = self.collapseItemDictionaries(variables,functionals,parameters)
         PDEs = [equation.execPDE(elementDict) for equation in self.equations]
-        return functionals, PDEs, variables
+        return functionals, PDEs, variables, parameters
     
-    def collapseItemDictionaries(self,variables,functionals):
-        elementDict = {**variables,**self.constants,**self.parameters,**functionals}
+    def collapseItemDictionaries(self,variables,functionals,parameters):
+        elementDict = {**variables,**self.constants,**parameters,**functionals}
         return elementDict
     
     def createVariables(self,variableNames):
         variableDict = {varname:Variable(varname) for varname in variableNames}
         return variableDict
     
-    def createParams(self,paramSpecs):
-        params = {spec['name']:Parameter(**spec,inputs=self.variables) for spec in paramSpecs}
+    def createParams(self,variables):
+        params = {paramName:Parameter(inputs=list(variables.values()),**specs) for paramName,specs in self.parameterSpecs.items()}
         return params
-        
 
+
+    def prepareFunctionalSentence(self,sentence,elementDict):
+        splittedFunctional = sentence.split('#')
+        newElementNames = {k:'elementDict["'+k+'"]' for k in elementDict.keys()}
+        preparedFunctional = ''.join([str(newElementNames.get(k,k)) for k in splittedFunctional])
+        return preparedFunctional
 
     
 

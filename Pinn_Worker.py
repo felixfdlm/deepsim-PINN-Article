@@ -25,14 +25,16 @@ import time
 
 class PINN_Worker(Worker):
     
-    def __init__(self,valData,test_gridObj,PDESystem,configspecs,valFromFEM=True,experiment_name='DEFAULT'
-                 ,*args,**kwargs):
+    def __init__(self,valData,test_gridObj,PDESystem,configspecs,valFromFEM=True,valParams={}
+                 experiment_name='DEFAULT',eval_mode='functional',
+                 *args,**kwargs):
         
         #Worker elements
         super().__init__(*args, **kwargs)
         print('Creating client')
         self.client = mlflow.tracking.MlflowClient()
         self.mlflow_id = kwargs['id']
+        self.eval_mode = eval_mode
         
         #Check if experiment exists and get id. If not, create experiment and save id
         if experiment_name in [experiment.name for experiment in mlflow.list_experiments()]:
@@ -73,6 +75,12 @@ class PINN_Worker(Worker):
         print('Saving PDE and config')
         self.PDESystem = PDESystem
         self.configspecs = configspecs
+        #
+        if eval_mode == 'parameter':
+            if len(valParams<1):
+                print('WARNING: Param mode was chosen, but no param values were given')
+            self.valParams = valParams
+        
         print('Worker ready')
         
     def compute(self,config,budget,**kwargs):
@@ -85,7 +93,7 @@ class PINN_Worker(Worker):
                                  self.test_gridObj.cubes, config['denspt'])
         
         activator_obj = tf.keras.activations.deserialize(config['activator'])
-        Functionals, PDEs, variables = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],activator_obj)
+        Functionals, PDEs, variables, params = self.PDESystem.getPDEs(config['numNeurons'],config['numLayers'],activator_obj)
         m = sn.SciModel(list(variables.values()),PDEs,config['loss'],config['optimizer'])
         
         dimlist, data = self.PDESystem.evalSystem(train_gridObj)
@@ -118,7 +126,7 @@ class PINN_Worker(Worker):
         
         L1 = self.test_gridObj.volume * np.sum([np.mean(np.abs(error)) for error in predErrors])
         
-        L2 = self.test_gridObj.volume * np.sum([np.mean(error**2)**1/2 for error in predErrors])
+        L2 = self.test_gridObj.volume * np.sum([np.mean(error**2) for error in predErrors])
     
         MAX = np.max([np.abs(error).max() for error in predErrors])
         
@@ -128,21 +136,37 @@ class PINN_Worker(Worker):
         self.client.log_metric(run_id=run.info.run_id,key='TrainTime',value=TrainTime)
         self.client.log_metric(run_id=run.info.run_id,key='TestTime',value=TestTime)
         
+        if self.eval_mode == 'parameter':
+            paramError = np.mean([abs(params[key].value-self.valParams[key]) for key in self.valParams.keys()])
+            self.client.log_metric(run_id=run.info.run_id,key='ParamError',value=paramError)
+
+        
         np.save('Predictions'+str(self.mlflow_id),np.array(preds),allow_pickle=True)
         self.client.log_artifact(run.info.run_id,'Predictions' + str(self.mlflow_id) + '.npy')
         
         np.save('History'+str(self.mlflow_id),history.history,allow_pickle=True)
         self.client.log_artifact(run.info.run_id,'History' + str(self.mlflow_id) + '.npy')
         
-        return ({
-			'loss': L1, # remember: HpBandSter always minimizes!
-			'info': {	'L1': L1,
-						'L2': L2,
-						'MAX': MAX,
-						'TrainTime': TrainTime,
-					}})
-						
-		
+        if self.eval_mode == 'parameter':
+            return ({
+                'loss': paramError, # remember: HpBandSter always minimizes!
+                'info': {'L1': L1,
+                        'L2': L2,
+                        'MAX': MAX,
+                        'ParamError':paramError,
+                        'TrainTime': TrainTime,
+                    }})
+        
+        else:
+            return ({
+                'loss': L1, # remember: HpBandSter always minimizes!
+                'info': {	'L1': L1,
+                            'L2': L2,
+                            'MAX': MAX,
+                            'TrainTime': TrainTime,
+                        }})
+                    
+    
 
     def get_configspace(self):
         
