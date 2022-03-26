@@ -31,12 +31,23 @@ class PDESystem:
             print('This object is not an Equation')
      
     def createFunctionals(self,numNeurons,numLayers,activation,variables):
+        #Initialize empty functional dictionary
         functionals = {}
-        for funcName in self.funcNames.keys():
+        #First create base functionals (the ones defined by numbers).
+        for funcName in [key for key in self.funcNames.keys() if type(self.funcNames[key])==int]:
             functionals[funcName] = Functional(funcName,
                                                     list(variables.values()),
-                                                    10*[10],
+                                                    numNeurons*[numLayers],
                                                     activation)
+            
+        #Then create the functionals derived from base ones
+        for funcName in [key for key in self.funcNames.keys() if type(self.funcNames[key])==str]:
+            sentence = self.funcNames[funcName]
+            elementDict = self.collapseItemDictionaries(variables,functionals)
+            preparedFunctionalSentence = self.prepareFunctionalSentence(sentence,elementDict)
+            
+            exec(funcName + '=' + preparedFunctionalSentence)
+            functionals[funcName] = locals()[funcName]
         return functionals
             
         
@@ -68,8 +79,13 @@ class PDESystem:
     def createParams(self,paramSpecs):
         params = {spec['name']:Parameter(**spec,inputs=self.variables) for spec in paramSpecs}
         return params
-        
 
+
+    def prepareFunctionalSentence(self,sentence,elementDict):
+        splittedFunctional = sentence.split('#')
+        newElementNames = {k:'elementDict["'+k+'"]' for k in elementDict.keys()}
+        preparedFunctional = ''.join([str(newElementNames.get(k,k)) for k in splittedFunctional])
+        return preparedFunctional
 
     
 
