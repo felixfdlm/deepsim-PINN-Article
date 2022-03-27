@@ -35,6 +35,7 @@ class PINN_Worker(Worker):
         self.client = mlflow.tracking.MlflowClient()
         self.mlflow_id = kwargs['id']
         self.eval_mode = eval_mode
+        self.eval_functionals = eval_functionals
         
         #Check if experiment exists and get id. If not, create experiment and save id
         if experiment_name in [experiment.name for experiment in mlflow.list_experiments()]:
@@ -82,7 +83,7 @@ class PINN_Worker(Worker):
         
         
         if eval_mode == 'parameter':
-            if len(valParams<1):
+            if len(valParams)<1:
                 print('WARNING: Param mode was chosen, but no param values were given')
             self.valParams = valParams
         
@@ -121,7 +122,7 @@ class PINN_Worker(Worker):
         TrainTime = time.process_time()-start
         
         start2 = time.process_time()
-        if eval_functionals is None:
+        if self.eval_functionals is None:
             preds = []
 
             for functional in Functionals.values():
@@ -129,19 +130,19 @@ class PINN_Worker(Worker):
                 preds.append(pred)
         else:
             preds = {}
-            for functional_name in eval_functionals:
+            for functional_name in self.eval_functionals:
                 preds[functional_name] = Functionals[functional_name].eval(m,[self.test_gridObj.grid[:,i] for i in range(self.test_gridObj.grid.shape[1])])
                 
                 
         TestTime = time.process_time() - start2
         
-        if eval_functionals is None:
+        if self.eval_functionals is None:
             predErrors = []
             for pred,val in zip(preds,self.validation_preds) :
                 predErrors.append(pred-val)
         else:
             predErrors = []
-            for functional_name,valindex in zip(eval_functionals,range(len(eval_functionals)):
+            for functional_name,valindex in zip(self.eval_functionals,range(len(self.eval_functionals))):
                 predErrors.append( preds[functional_name] - self.validation_preds[valindex])
                 
         
