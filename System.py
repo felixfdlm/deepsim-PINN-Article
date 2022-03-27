@@ -37,7 +37,7 @@ class PDESystem:
         for funcName in [key for key in self.funcNames.keys() if type(self.funcNames[key])==int]:
             functionals[funcName] = Functional(funcName,
                                                     list(variables.values()),
-                                                    numNeurons*[numLayers],
+                                                    numLayers*[numNeurons],
                                                     activation)
             
         #Then create the functionals derived from base ones
