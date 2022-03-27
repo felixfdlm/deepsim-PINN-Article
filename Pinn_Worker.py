@@ -25,7 +25,7 @@ import time
 
 class PINN_Worker(Worker):
     
-    def __init__(self,valData,test_gridObj,PDESystem,configspecs,valFromFEM=True,valParams={}
+    def __init__(self,valData,test_gridObj,PDESystem,configspecs,valFromFEM=True,valParams={},
                  experiment_name='DEFAULT',eval_mode='functional',
                  *args,**kwargs):
         
@@ -105,6 +105,8 @@ class PINN_Worker(Worker):
         self.client.log_param(run_id=run.info.run_id,key='Loss Function',value=config['loss'])
         self.client.log_param(run_id=run.info.run_id,key='Optimizer',value=config['optimizer'])
         self.client.log_param(run_id=run.info.run_id,key='Initial LR',value=config['initial_lr'])
+        self.client.log_param(run_id=run.info.run_id,key='Batch size',value=config['batch_size'])
+
         self.client.log_param(run_id=run.info.run_id,key='Num Points',value=train_gridObj.grid.shape[0])
         self.client.log_param(run_id=run.info.run_id,key='Epochs',value=int(budget))
         
@@ -147,6 +149,8 @@ class PINN_Worker(Worker):
         np.save('History'+str(self.mlflow_id),history.history,allow_pickle=True)
         self.client.log_artifact(run.info.run_id,'History' + str(self.mlflow_id) + '.npy')
         
+        self.client.set_terminated(run.info.run_id)
+        
         if self.eval_mode == 'parameter':
             return ({
                 'loss': paramError, # remember: HpBandSter always minimizes!
@@ -157,14 +161,26 @@ class PINN_Worker(Worker):
                         'TrainTime': TrainTime,
                     }})
         
+        
+        
         else:
-            return ({
-                'loss': L1, # remember: HpBandSter always minimizes!
-                'info': {	'L1': L1,
-                            'L2': L2,
-                            'MAX': MAX,
-                            'TrainTime': TrainTime,
-                        }})
+            
+            if np.isnan(L1):
+                return ({
+                    'loss': np.finfo(np.float).max, # remember: HpBandSter always minimizes!
+                    'info': {	'L1': L1,
+                                'L2': L2,
+                                'MAX': MAX,
+                                'TrainTime': TrainTime,
+                            }})                
+            else:
+                return ({
+                    'loss': L1, # remember: HpBandSter always minimizes!
+                    'info': {	'L1': L1,
+                                'L2': L2,
+                                'MAX': MAX,
+                                'TrainTime': TrainTime,
+                            }})
                     
     
 
